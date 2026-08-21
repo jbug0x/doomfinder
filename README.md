@@ -27,7 +27,7 @@ Todas as consultas são **passivas** — nenhuma requisição é feita diretamen
 Clone o repositório e rode o instalador:
 
 ```bash
-git clone https://github.com/jbug0x/domfinder.git
+git clone https://github.com/SEU_USUARIO/domfinder.git
 cd domfinder
 chmod +x install.sh domfinder.sh
 ./install.sh
@@ -71,10 +71,23 @@ domfinder -d <dominio.com> -o <arquivo_final> [-VT <VT_API_KEY>] [-vv]
 |-------------------|:-----------:|-----------------------------------------------------------------------------|
 | `-d, --domain`    | ✅          | Domínio alvo (ex: `exemplo.com`)                                            |
 | `-o, --output`    | ✅          | Caminho do arquivo final consolidado (ex: `/Documentos/all.txt`)            |
-| `-VT, --vt-api`   | ❌          | API key do VirusTotal. Se omitida, essa fonte é pulada                      |
+| `-VT, --vt-api`   | ❌          | API key do VirusTotal. Se omitida, essa fonte é pulada. **Evite usar essa flag** — veja abaixo |
 | `-vv`             | ❌          | Mantém os arquivos intermediários (por fonte) no mesmo diretório do `-o`. Sem essa flag, eles são gerados em `/tmp` e apagados ao final |
 | `-h, --help`      | ❌          | Mostra a ajuda                                                               |
 | `--version`       | ❌          | Mostra a versão instalada                                                    |
+
+### Passando a API key do VirusTotal com segurança
+
+Passar a key direto na flag `-VT` deixa ela visível em `history` e em `ps aux` (qualquer outro usuário na máquina consegue ver enquanto o script roda). A forma recomendada é via variável de ambiente:
+
+```bash
+export DOMFINDER_VT_KEY="sua_api_key"
+domfinder -d exemplo.com -o all_subs.txt
+```
+
+Se quiser que fique disponível em todas as sessões, adicione o `export` no seu `.bashrc`/`.zshrc` (fora do controle de versão, claro).
+
+Se a flag `-VT` for usada mesmo assim, o script funciona normalmente mas emite um aviso sugerindo a variável de ambiente.
 
 ### Exemplos
 
@@ -82,11 +95,15 @@ domfinder -d <dominio.com> -o <arquivo_final> [-VT <VT_API_KEY>] [-vv]
 # uso básico, sem VirusTotal
 domfinder -d exemplo.com -o all_subs.txt
 
-# com VirusTotal
+# com VirusTotal (via env var, recomendado)
+export DOMFINDER_VT_KEY="sua_api_key"
+domfinder -d exemplo.com -o all_subs.txt
+
+# com VirusTotal via flag (funciona, mas gera aviso de segurança)
 domfinder -d exemplo.com -o all_subs.txt -VT SUA_API_KEY
 
 # mantendo os arquivos individuais de cada fonte (crtsh.txt, subfinder.txt, etc)
-domfinder -d exemplo.com -o /Documentos/recon/all_subs.txt -VT SUA_API_KEY -vv
+domfinder -d exemplo.com -o /Documentos/recon/all_subs.txt -vv
 ```
 
 ## Saída

@@ -9,10 +9,15 @@ if [ -z "${BASH_VERSION:-}" ]; then
     exec bash "$0" "$@"
 fi
 
-VERSION="1.1.0"
+VERSION="1.2.0"
+
+warn() { echo "[!] $*"; }
 
 DOMAIN=""
-VT_API_KEY=""
+# Se a variável de ambiente estiver setada, ela já entra como valor padrão.
+# -VT/--vt-api na linha de comando, se usado, tem prioridade e sobrescreve.
+VT_API_KEY="${DOMFINDER_VT_KEY:-}"
+VT_FROM_FLAG=false
 OUTPUT_FILE=""
 VERBOSE=false
 
@@ -39,15 +44,24 @@ Uso: $0 -d <dominio.com> -o <arquivo_final> [-VT <VT_API_KEY>] [-vv]
   -d, --domain          Domínio alvo (obrigatório) (ex: stripchat.com)
   -o, --output          Caminho do arquivo final consolidado (ex: /Documentos/all.txt)
   -VT, --vt-api         API key do VirusTotal (opcional; se ausente, essa etapa é pulada)
+                         Alternativa mais segura: export DOMFINDER_VT_KEY="sua_key"
+                         (evita a key ficar visível no histórico do shell e em 'ps aux')
   -vv                   Gera os arquivos intermediários no mesmo diretório do -o
                          (por padrão eles ficam em um dir temporário sob /tmp)
   -h, --help            Mostra esta ajuda
   --version             Mostra a versão
 
 Exemplos:
-  $0 -d example.com -o /Documentos/all.txt
-  $0 -d example.com -o /Documentos/all.txt -VT abc123
-  $0 -d example.com -o /Documentos/all.txt -VT abc123 -vv
+  $0 -d stripchat.com -o /Documentos/all.txt
+
+  # recomendado: key via variável de ambiente (não fica no history)
+  export DOMFINDER_VT_KEY="abc123"
+  $0 -d stripchat.com -o /Documentos/all.txt
+
+  # alternativa: key direto na flag (fica visível em history/ps aux)
+  $0 -d stripchat.com -o /Documentos/all.txt -VT abc123
+
+  $0 -d stripchat.com -o /Documentos/all.txt -vv
 USAGE
     exit 0
 }
@@ -78,7 +92,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         -d|--domain) DOMAIN="$2"; shift 2 ;;
         -o|--output) OUTPUT_FILE="$2"; shift 2 ;;
-        -VT|--vt-api) VT_API_KEY="$2"; shift 2 ;;
+        -VT|--vt-api) VT_API_KEY="$2"; VT_FROM_FLAG=true; shift 2 ;;
         -vv) VERBOSE=true; shift ;;
         -h|--help) usage ;;
         --version) version ;;
@@ -117,6 +131,12 @@ echo "[*] Arquivos intermed.  : $WORKDIR"
 echo "[*] Arquivo final       : $OUTPUT_FILE"
 if [ -z "$VT_API_KEY" ]; then
     echo "[*] VirusTotal          : desativado (nenhuma key informada)"
+elif $VT_FROM_FLAG; then
+    echo "[*] VirusTotal          : ativado (key via -VT)"
+    warn "Passar a key por -VT deixa ela visível em 'history' e 'ps aux'."
+    warn "Prefira: export DOMFINDER_VT_KEY=\"sua_key\"  (e rode sem -VT)"
+else
+    echo "[*] VirusTotal          : ativado (key via variável de ambiente DOMFINDER_VT_KEY)"
 fi
 echo
 
