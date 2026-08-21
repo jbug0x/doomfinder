@@ -19,6 +19,7 @@ Script de reconhecimento passivo de subdomínios para uso em programas de **bug 
 - [assetfinder](https://github.com/tomnomnom/assetfinder) — tomnomnom
 - [amass](https://github.com/owasp-amass/amass) (modo passive) — OWASP
 - [VirusTotal](https://www.virustotal.com) (opcional, requer API key)
+- [httpx](https://github.com/projectdiscovery/httpx) (opcional, checagem de hosts vivos via `-A`)
 
 Todas as consultas são **passivas** — nenhuma requisição é feita diretamente contra o domínio alvo.
 
@@ -73,6 +74,7 @@ domfinder -d <dominio.com> -o <arquivo_final> [-VT <VT_API_KEY>] [-vv]
 | `-o, --output`    | ✅          | Caminho do arquivo final consolidado (ex: `/Documentos/all.txt`)            |
 | `-VT, --vt-api`   | ❌          | API key do VirusTotal. Se omitida, essa fonte é pulada. **Evite usar essa flag** — veja abaixo |
 | `-vv`             | ❌          | Mantém os arquivos intermediários (por fonte) no mesmo diretório do `-o`. Sem essa flag, eles são gerados em `/tmp` e apagados ao final |
+| `-A, --alive`     | ❌          | Roda [httpx](https://github.com/projectdiscovery/httpx) sobre o resultado final e gera um arquivo extra só com os hosts vivos (status code, título, tech detectada) |
 | `-h, --help`      | ❌          | Mostra a ajuda                                                               |
 | `--version`       | ❌          | Mostra a versão instalada                                                    |
 
@@ -104,7 +106,26 @@ domfinder -d exemplo.com -o all_subs.txt -VT SUA_API_KEY
 
 # mantendo os arquivos individuais de cada fonte (crtsh.txt, subfinder.txt, etc)
 domfinder -d exemplo.com -o /Documentos/recon/all_subs.txt -vv
+
+# checando quais subdomínios estão vivos (status code, título, tech)
+domfinder -d exemplo.com -o all_subs.txt -A
 ```
+
+## Checagem de hosts vivos (`-A`)
+
+Com a flag `-A`/`--alive`, ao final da enumeração o script roda o [httpx](https://github.com/projectdiscovery/httpx) sobre o arquivo consolidado e gera um segundo arquivo, `alive_<nome_do_arquivo>`, no mesmo diretório do `-o`:
+
+```bash
+domfinder -d exemplo.com -o /Documentos/recon/all_subs.txt -A
+```
+
+```
+/Documentos/recon/
+├── all_subs.txt          <- todos os subdomínios encontrados
+└── alive_all_subs.txt    <- só os que responderam, com status code + título + tech
+```
+
+Requer o `httpx` instalado (o `install.sh` já cuida disso). Sem a flag `-A`, essa etapa é pulada e o `httpx` nem precisa estar instalado.
 
 ## Saída
 

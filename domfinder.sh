@@ -9,9 +9,10 @@ if [ -z "${BASH_VERSION:-}" ]; then
     exec bash "$0" "$@"
 fi
 
-VERSION="1.2.0"
+VERSION="1.3.0"
 
 warn() { echo "[!] $*"; }
+ok()   { echo "[+] $*"; }
 
 DOMAIN=""
 # Se a variável de ambiente estiver setada, ela já entra como valor padrão.
@@ -20,6 +21,7 @@ VT_API_KEY="${DOMFINDER_VT_KEY:-}"
 VT_FROM_FLAG=false
 OUTPUT_FILE=""
 VERBOSE=false
+ALIVE_CHECK=false
 
 banner() {
     cat <<'BANNER'
@@ -39,7 +41,7 @@ usage() {
     cat <<USAGE
 DomFinder v${VERSION}
 
-Uso: $0 -d <dominio.com> -o <arquivo_final> [-VT <VT_API_KEY>] [-vv]
+Uso: $0 -d <dominio.com> -o <arquivo_final> [-VT <VT_API_KEY>] [-vv] [-A]
 
   -d, --domain          Domínio alvo (obrigatório) (ex: stripchat.com)
   -o, --output          Caminho do arquivo final consolidado (ex: /Documentos/all.txt)
@@ -48,6 +50,9 @@ Uso: $0 -d <dominio.com> -o <arquivo_final> [-VT <VT_API_KEY>] [-vv]
                          (evita a key ficar visível no histórico do shell e em 'ps aux')
   -vv                   Gera os arquivos intermediários no mesmo diretório do -o
                          (por padrão eles ficam em um dir temporário sob /tmp)
+  -A, --alive           Roda httpx sobre o resultado final e gera um arquivo extra
+                         só com os hosts vivos (status code, título, tech detectada).
+                         Requer o httpx instalado (github.com/projectdiscovery/httpx).
   -h, --help            Mostra esta ajuda
   --version             Mostra a versão
 
@@ -62,6 +67,9 @@ Exemplos:
   $0 -d stripchat.com -o /Documentos/all.txt -VT abc123
 
   $0 -d stripchat.com -o /Documentos/all.txt -vv
+
+  # gera também um alive_all.txt com os hosts que respondem
+  $0 -d stripchat.com -o /Documentos/all.txt -A
 USAGE
     exit 0
 }
@@ -73,8 +81,13 @@ version() {
 
 check_deps() {
     local missing=""
+    local required="curl jq subfinder assetfinder amass"
 
-    for bin in curl jq subfinder assetfinder amass; do
+    if $ALIVE_CHECK; then
+        required="$required httpx"
+    fi
+
+    for bin in $required; do
         if ! command -v "$bin" >/dev/null 2>&1; then
             missing="$missing $bin"
         fi
@@ -94,6 +107,7 @@ while [ $# -gt 0 ]; do
         -o|--output) OUTPUT_FILE="$2"; shift 2 ;;
         -VT|--vt-api) VT_API_KEY="$2"; VT_FROM_FLAG=true; shift 2 ;;
         -vv) VERBOSE=true; shift ;;
+        -A|--alive) ALIVE_CHECK=true; shift ;;
         -h|--help) usage ;;
         --version) version ;;
         *) echo "[!] Opção desconhecida: $1"; usage ;;
@@ -196,6 +210,24 @@ cat "$WORKDIR/crtsh.txt" "$WORKDIR/subfinder.txt" "$WORKDIR/assetfinder.txt" "$W
 
 echo "[+] Total de subdomínios únicos: $(wc -l < "$OUTPUT_FILE")"
 echo "[+] Resultado final em: $OUTPUT_FILE"
+
+# ---------- Checagem de hosts vivos (opcional) ----------
+if $ALIVE_CHECK; then
+    OUT_DIR="$(dirname "$OUTPUT_FILE")"
+    OUT_BASE="$(basename "$OUTPUT_FILE")"
+    ALIVE_FILE="$OUT_DIR/alive_$OUT_BASE"
+
+    echo
+    echo "[*] Checando hosts vivos com httpx ..."
+    httpx -l "$OUTPUT_FILE" -silent -status-code -title -tech-detect -follow-redirects -o "$ALIVE_FILE"
+
+    if [ -s "$ALIVE_FILE" ]; then
+        ok "Hosts vivos: $(wc -l < "$ALIVE_FILE")"
+        ok "Resultado em: $ALIVE_FILE"
+    else
+        warn "httpx não retornou nenhum host vivo (ou falhou)."
+    fi
+fi
 
 # ---------- Limpeza (só remove se não for modo -vv) ----------
 if $CLEANUP; then

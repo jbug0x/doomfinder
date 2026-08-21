@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # install.sh - Instalador do DomFinder
-# Instala dependências (curl, jq, go, subfinder, assetfinder, amass),
+# Instala dependências (curl, jq, go, subfinder, assetfinder, amass, httpx),
 # copia o domfinder para ~/.local/bin e garante que esse dir está no PATH.
 #
 # criado por jbug0x
@@ -36,6 +36,29 @@ log()  { echo "[*] $*"; }
 ok()   { echo "[+] $*"; }
 warn() { echo "[!] $*"; }
 err()  { echo "[x] $*" >&2; }
+
+# Pergunta y/n ao usuário. Uso: ask_yes_no "pergunta" "default(y|n)"
+# Lê de /dev/tty para funcionar mesmo se o script for chamado via pipe (ex: curl | bash)
+ask_yes_no() {
+    local prompt="$1"
+    local default="${2:-y}"
+    local hint="[Y/n]"
+    local answer
+
+    [ "$default" = "n" ] && hint="[y/N]"
+
+    if [ ! -t 0 ] && [ ! -r /dev/tty ]; then
+        # sem terminal interativo disponível, usa o default
+        [ "$default" = "y" ] && return 0 || return 1
+    fi
+
+    read -r -p "$prompt $hint " answer < /dev/tty
+    answer="${answer:-$default}"
+    case "$answer" in
+        y|Y|s|S|sim|yes) return 0 ;;
+        *) return 1 ;;
+    esac
+}
 
 # ---------- 0. Checa se domfinder.sh existe ----------
 if [ ! -f "$SOURCE_SCRIPT" ]; then
@@ -73,69 +96,108 @@ install_pkg() {
     esac
 }
 
-# ---------- 2. Instala dependências de sistema (curl, jq, git, go) ----------
+# Mapeia binário -> nome do pacote (nem sempre é igual, ex: go)
+pkg_name_for() {
+    local bin="$1"
+    case "$bin" in
+        go)
+            case "$PKG_MANAGER" in
+                apt) echo "golang-go" ;;
+                *)   echo "go" ;;
+            esac
+            ;;
+        *) echo "$bin" ;;
+    esac
+}
+
+# ---------- 2. Verifica o que falta e pergunta sobre uso de sudo ----------
 log "Verificando dependências de sistema ..."
 
-if [ -n "$PKG_MANAGER" ] && [ "$PKG_MANAGER" = "apt" ]; then
-    sudo apt-get update -y
-fi
-
-for bin in curl jq git; do
-    if command -v "$bin" >/dev/null 2>&1; then
-        ok "$bin já instalado."
-    else
-        log "Instalando $bin ..."
-        if ! install_pkg "$bin"; then
-            err "Falha ao instalar $bin. Instale manualmente e rode este script de novo."
-            exit 1
-        fi
-    fi
+MISSING_DEPS=""
+for bin in curl jq git go; do
+    command -v "$bin" >/dev/null 2>&1 || MISSING_DEPS="$MISSING_DEPS $bin"
 done
 
-# Go é necessário para compilar subfinder/assetfinder/amass
-if command -v go >/dev/null 2>&1; then
-    ok "go já instalado ($(go version))."
+if [ -z "$MISSING_DEPS" ]; then
+    ok "Todas as dependências de sistema (curl, jq, git, go) já estão instaladas."
 else
-    log "Instalando go ..."
-    case "$PKG_MANAGER" in
-        apt)    install_pkg golang-go ;;
-        dnf)    install_pkg golang ;;
-        yum)    install_pkg golang ;;
-        pacman) install_pkg go ;;
-        brew)   install_pkg go ;;
-        *)
-            err "Não consegui instalar go automaticamente."
-            err "Instale manualmente: https://go.dev/doc/install"
-            exit 1
-            ;;
-    esac
+    warn "Dependências faltando:$MISSING_DEPS"
+
+    ALLOW_SUDO=false
+    if [ -n "$PKG_MANAGER" ]; then
+        if ask_yes_no "Deseja instalar essas dependências automaticamente usando sudo?" "y"; then
+            ALLOW_SUDO=true
+        fi
+    else
+        warn "Nenhum gerenciador de pacotes suportado foi detectado, então sudo não ajudaria aqui."
+    fi
+
+    if $ALLOW_SUDO && [ "$PKG_MANAGER" = "apt" ]; then
+        sudo apt-get update -y
+    fi
+
+    for bin in curl jq git go; do
+        command -v "$bin" >/dev/null 2>&1 && continue
+
+        pkg="$(pkg_name_for "$bin")"
+
+        if $ALLOW_SUDO; then
+            log "Instalando $bin ..."
+            if ! install_pkg "$pkg"; then
+                err "Falha ao instalar $bin via $PKG_MANAGER."
+                warn "Instale manualmente: $bin (pacote: $pkg)"
+            fi
+        else
+            # sudo global recusado: pergunta individualmente para essa dependência
+            if [ -n "$PKG_MANAGER" ] && ask_yes_no "  -> Instalar '$bin' agora usando root (sudo), só para essa dependência?" "n"; then
+                log "Instalando $bin ..."
+                if ! install_pkg "$pkg"; then
+                    err "Falha ao instalar $bin via $PKG_MANAGER."
+                fi
+            else
+                warn "Pulando $bin. Instale manualmente depois: $pkg"
+            fi
+        fi
+    done
 fi
 
 # Garante GOBIN no PATH da sessão atual (necessário pra rodar 'go install' e achar os binários depois)
 export PATH="$PATH:$GOBIN_DIR"
 
 # ---------- 3. Instala subfinder, assetfinder, amass via go install ----------
-log "Verificando subfinder, assetfinder e amass ..."
-
-if command -v subfinder >/dev/null 2>&1; then
-    ok "subfinder já instalado."
+if ! command -v go >/dev/null 2>&1; then
+    warn "go não está instalado — pulando subfinder, assetfinder e amass."
+    warn "Instale o go depois e rode este install.sh novamente para completar."
 else
-    log "Instalando subfinder ..."
-    go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
-fi
+    log "Verificando subfinder, assetfinder e amass ..."
 
-if command -v assetfinder >/dev/null 2>&1; then
-    ok "assetfinder já instalado."
-else
-    log "Instalando assetfinder ..."
-    go install -v github.com/tomnomnom/assetfinder@latest
-fi
+    if command -v subfinder >/dev/null 2>&1; then
+        ok "subfinder já instalado."
+    else
+        log "Instalando subfinder ..."
+        go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+    fi
 
-if command -v amass >/dev/null 2>&1; then
-    ok "amass já instalado."
-else
-    log "Instalando amass ..."
-    go install -v github.com/owasp-amass/amass/v4/...@master
+    if command -v assetfinder >/dev/null 2>&1; then
+        ok "assetfinder já instalado."
+    else
+        log "Instalando assetfinder ..."
+        go install -v github.com/tomnomnom/assetfinder@latest
+    fi
+
+    if command -v amass >/dev/null 2>&1; then
+        ok "amass já instalado."
+    else
+        log "Instalando amass ..."
+        go install -v github.com/owasp-amass/amass/v4/...@master
+    fi
+
+    if command -v httpx >/dev/null 2>&1; then
+        ok "httpx já instalado."
+    else
+        log "Instalando httpx (usado pela flag -A/--alive do domfinder) ..."
+        go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+    fi
 fi
 
 # ---------- 4. Copia o domfinder para ~/.local/bin ----------
@@ -149,15 +211,11 @@ ok "Copiado para $INSTALL_BIN_DIR/$TARGET_NAME"
 PATH_LINE_LOCAL='export PATH="$HOME/.local/bin:$PATH"'
 PATH_LINE_GO='export PATH="$HOME/go/bin:$PATH"'
 
-RC_FILES=()
-[ -n "${BASH_RC:-}" ] && RC_FILES+=("$BASH_RC")
-[ -f "$HOME/.bashrc" ] && RC_FILES+=("$HOME/.bashrc")
-[ -f "$HOME/.zshrc" ]  && RC_FILES+=("$HOME/.zshrc")
+RC_FILES=""
+[ -f "$HOME/.bashrc" ] && RC_FILES="$RC_FILES $HOME/.bashrc"
+[ -f "$HOME/.zshrc" ]  && RC_FILES="$RC_FILES $HOME/.zshrc"
 
-# remove duplicatas
-RC_FILES=($(printf "%s\n" "${RC_FILES[@]}" | sort -u))
-
-if [ "${#RC_FILES[@]}" -eq 0 ]; then
+if [ -z "$RC_FILES" ]; then
     warn "Não encontrei ~/.bashrc nem ~/.zshrc."
     echo
     echo "    Você não tem nenhum arquivo de configuração de shell ainda."
@@ -170,7 +228,7 @@ if [ "${#RC_FILES[@]}" -eq 0 ]; then
     echo "      $PATH_LINE_GO"
     echo
 else
-    for rc in "${RC_FILES[@]}"; do
+    for rc in $RC_FILES; do
         CHANGED=false
 
         if ! grep -qF "$PATH_LINE_LOCAL" "$rc" 2>/dev/null; then
