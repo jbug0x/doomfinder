@@ -27,7 +27,7 @@ Todas as consultas são **passivas** — nenhuma requisição é feita diretamen
 Clone o repositório e rode o instalador:
 
 ```bash
-git clone https://github.com/SEU_USUARIO/domfinder.git
+git clone https://github.com/jbug0x/domfinder.git
 cd domfinder
 chmod +x install.sh domfinder.sh
 ./install.sh
